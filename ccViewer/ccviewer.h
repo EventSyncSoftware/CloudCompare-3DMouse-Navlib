@@ -34,7 +34,7 @@
 
 class ccGLWindowInterface;
 class ccHObject;
-class Mouse3DInput;
+class cc3DMouseManager;
 
 //! Application main window
 class ccViewer : public QMainWindow
@@ -167,13 +167,8 @@ class ccViewer : public QMainWindow
 	void changeCurrentScalarField(bool);
 
 	// 3D mouse
-	void on3DMouseMove(std::vector<float>&);
-	void on3DMouseKeyUp(int);
-	void on3DMouseKeyDown(int);
-	void on3DMouseCMDKeyDown(int);
-	void on3DMouseCMDKeyUp(int);
-	void on3DMouseReleased();
-	void enable3DMouse(bool state);
+	void setup3DMouse();
+	void release3DMouse();
 
 	// GL filters
 	void doEnableGLFilter();
@@ -202,17 +197,14 @@ class ccViewer : public QMainWindow
 	bool checkStereoMode();
 
   protected: // members
-	//! Releases any connected 3D mouse (if any)
-	void release3DMouse();
-
 	//! Associated GL context
 	ccGLWindowInterface* m_glWindow;
 
 	//! Currently selected object
 	ccHObject* m_selectedObject;
 
-	//! 3D mouse handler
-	Mouse3DInput* m_3dMouseInput;
+	//! 3D mouse manager (handles both navlib and legacy backends)
+	cc3DMouseManager* m_3DMouseManager;
 
   private:
 	//! Associated GUI

@@ -25,7 +25,7 @@ class QAction;
 class QMenu;
 
 class ccMainAppInterface;
-class Mouse3DInput;
+class I3DMouseBackend;
 
 class CCAPPCOMMON_LIB_API cc3DMouseManager : public QObject
 {
@@ -47,6 +47,7 @@ class CCAPPCOMMON_LIB_API cc3DMouseManager : public QObject
 
 	void setupMenu();
 
+	//! Legacy backend signal handlers
 	void on3DMouseKeyUp(int key);
 	void on3DMouseCMDKeyUp(int cmd);
 	void on3DMouseKeyDown(int key);
@@ -56,7 +57,7 @@ class CCAPPCOMMON_LIB_API cc3DMouseManager : public QObject
 
 	ccMainAppInterface* m_appInterface;
 
-	Mouse3DInput* m3dMouseInput;
+	I3DMouseBackend* m_backend;
 
 	QMenu*   m_menu;
 	QAction* m_actionEnable;

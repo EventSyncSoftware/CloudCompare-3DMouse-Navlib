@@ -45,7 +45,7 @@
 
 // 3D mouse handler
 #ifdef CC_3DXWARE_SUPPORT
-#include "Mouse3DInput.h"
+#include "cc3DMouseManager.h"
 #endif
 
 // Camera parameters dialog
@@ -55,7 +55,7 @@ ccViewer::ccViewer(QWidget* parent, Qt::WindowFlags flags)
     : QMainWindow(parent, flags)
     , m_glWindow(nullptr)
     , m_selectedObject(nullptr)
-    , m_3dMouseInput(nullptr)
+    , m_3DMouseManager(nullptr)
 {
 	ui.setupUi(this);
 
@@ -95,7 +95,7 @@ ccViewer::ccViewer(QWidget* parent, Qt::WindowFlags flags)
 	reflectPivotVisibilityState();
 
 #ifdef CC_3DXWARE_SUPPORT
-	enable3DMouse(true);
+	setup3DMouse();
 #else
 	ui.actionEnable3DMouse->setEnabled(false);
 #endif
@@ -126,8 +126,7 @@ ccViewer::ccViewer(QWidget* parent, Qt::WindowFlags flags)
 	connect(ui.actionSetPivotAlwaysOn, &QAction::triggered, this, &ccViewer::setPivotAlwaysOn);
 	connect(ui.actionSetPivotRotationOnly, &QAction::triggered, this, &ccViewer::setPivotRotationOnly);
 	connect(ui.actionSetPivotOff, &QAction::triggered, this, &ccViewer::setPivotOff);
-	//"Options > 3D mouse" menu
-	connect(ui.actionEnable3DMouse, &QAction::toggled, this, &ccViewer::enable3DMouse);
+	//"Options > 3D mouse" menu - handled by cc3DMouseManager when CC_3DXWARE_SUPPORT is enabled
 	//"Display > Lights & Materials" menu
 	connect(ui.actionToggleSunLight, &QAction::toggled, this, &ccViewer::toggleSunLight);
 	connect(ui.actionToggleCustomLight, &QAction::toggled, this, &ccViewer::toggleCustomLight);
@@ -1096,269 +1095,19 @@ void ccViewer::doActionAbout()
 
 /*** 3D MOUSE SUPPORT ***/
 
+void ccViewer::setup3DMouse()
+{
+#ifdef CC_3DXWARE_SUPPORT
+	m_3DMouseManager = new cc3DMouseManager(this, this);
+#endif
+}
+
 void ccViewer::release3DMouse()
 {
 #ifdef CC_3DXWARE_SUPPORT
-	if (m_3dMouseInput)
-	{
-		m_3dMouseInput->disconnect(); // disconnect from the driver
-		disconnect(m_3dMouseInput);   // disconnect from Qt ;)
-
-		delete m_3dMouseInput;
-		m_3dMouseInput = 0;
-	}
+	delete m_3DMouseManager;
+	m_3DMouseManager = nullptr;
 #endif
-}
-
-void ccViewer::enable3DMouse(bool state)
-{
-#ifdef CC_3DXWARE_SUPPORT
-	if (m_3dMouseInput)
-		release3DMouse();
-
-	if (state)
-	{
-		m_3dMouseInput = new Mouse3DInput(this);
-		if (m_3dMouseInput->connect(this, "ccViewer"))
-		{
-			QObject::connect(m_3dMouseInput, &Mouse3DInput::sigMove3d, this, &ccViewer::on3DMouseMove);
-			QObject::connect(m_3dMouseInput, &Mouse3DInput::sigReleased, this, &ccViewer::on3DMouseReleased);
-			QObject::connect(m_3dMouseInput, &Mouse3DInput::sigOn3dmouseKeyDown, this, &ccViewer::on3DMouseKeyDown);
-			QObject::connect(m_3dMouseInput, &Mouse3DInput::sigOn3dmouseKeyUp, this, &ccViewer::on3DMouseKeyUp);
-			QObject::connect(m_3dMouseInput, &Mouse3DInput::sigOn3dmouseCMDKeyDown, this, &ccViewer::on3DMouseCMDKeyDown);
-			QObject::connect(m_3dMouseInput, &Mouse3DInput::sigOn3dmouseCMDKeyUp, this, &ccViewer::on3DMouseCMDKeyUp);
-		}
-		else
-		{
-			delete m_3dMouseInput;
-			m_3dMouseInput = 0;
-
-			ccLog::Warning("[3D Mouse] No device found");
-			state = false;
-		}
-	}
-	else
-	{
-		ccLog::Warning("[3D Mouse] Device has been disabled");
-	}
-#else
-	state = false;
-#endif
-
-	ui.actionEnable3DMouse->blockSignals(true);
-	ui.actionEnable3DMouse->setChecked(state);
-	ui.actionEnable3DMouse->blockSignals(false);
-}
-
-void ccViewer::on3DMouseKeyUp(int)
-{
-	// nothing right now
-}
-
-// ANY CHANGE/BUG FIX SHOULD BE REFLECTED TO THE EQUIVALENT METHODS IN QCC "MainWindow.cpp" FILE!
-void ccViewer::on3DMouseKeyDown(int key)
-{
-#ifdef CC_3DXWARE_SUPPORT
-
-	switch (key)
-	{
-	case Mouse3DInput::V3DK_MENU:
-		// should be handled by the driver now!
-		break;
-	case Mouse3DInput::V3DK_FIT:
-	{
-		if (m_selectedObject)
-			zoomOnSelectedEntity();
-		else
-			setGlobalZoom();
-	}
-	break;
-	case Mouse3DInput::V3DK_TOP:
-		setTopView();
-		break;
-	case Mouse3DInput::V3DK_LEFT:
-		setLeftView();
-		break;
-	case Mouse3DInput::V3DK_RIGHT:
-		setRightView();
-		break;
-	case Mouse3DInput::V3DK_FRONT:
-		setFrontView();
-		break;
-	case Mouse3DInput::V3DK_BOTTOM:
-		setBottomView();
-		break;
-	case Mouse3DInput::V3DK_BACK:
-		setBackView();
-		break;
-	case Mouse3DInput::V3DK_ROTATE:
-		// should be handled by the driver now!
-		break;
-	case Mouse3DInput::V3DK_PANZOOM:
-		// should be handled by the driver now!
-		break;
-	case Mouse3DInput::V3DK_ISO1:
-		setIsoView1();
-		break;
-	case Mouse3DInput::V3DK_ISO2:
-		setIsoView2();
-		break;
-	case Mouse3DInput::V3DK_PLUS:
-		// should be handled by the driver now!
-		break;
-	case Mouse3DInput::V3DK_MINUS:
-		// should be handled by the driver now!
-		break;
-	case Mouse3DInput::V3DK_DOMINANT:
-		// should be handled by the driver now!
-		break;
-	case Mouse3DInput::V3DK_CW:
-	case Mouse3DInput::V3DK_CCW:
-	{
-		if (m_glWindow)
-		{
-			CCVector3d  axis(0, 0, -1);
-			CCVector3d  trans(0, 0, 0);
-			ccGLMatrixd mat;
-			double      angle = M_PI / 2;
-			if (key == Mouse3DInput::V3DK_CCW)
-				angle = -angle;
-			mat.initFromParameters(angle, axis, trans);
-			m_glWindow->rotateBaseViewMat(mat);
-			m_glWindow->redraw();
-		}
-	}
-	break;
-	case Mouse3DInput::V3DK_ESC:
-	case Mouse3DInput::V3DK_ALT:
-	case Mouse3DInput::V3DK_SHIFT:
-	case Mouse3DInput::V3DK_CTRL:
-	default:
-		ccLog::Warning("[3D mouse] This button is not handled (yet)");
-		// TODO
-		break;
-	}
-
-#endif
-}
-void ccViewer::on3DMouseCMDKeyUp(int cmd)
-{
-	// nothing right now
-}
-
-void ccViewer::on3DMouseCMDKeyDown(int cmd)
-{
-#ifdef CC_3DXWARE_SUPPORT
-	switch (cmd)
-	{
-		// ccLog::Print(QString("on3DMouseCMDKeyDown Cmd = %1").arg(cmd));
-	case Mouse3DInput::V3DCMD_VIEW_FIT:
-	{
-		if (m_selectedObject)
-			zoomOnSelectedEntity();
-		else
-			setGlobalZoom();
-	}
-	break;
-	case Mouse3DInput::V3DCMD_VIEW_TOP:
-		setTopView();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_LEFT:
-		setLeftView();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_RIGHT:
-		setRightView();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_FRONT:
-		setFrontView();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_BOTTOM:
-		setBottomView();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_BACK:
-		setBackView();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_ISO1:
-		setIsoView1();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_ISO2:
-		setIsoView2();
-		break;
-	case Mouse3DInput::V3DCMD_VIEW_ROLLCW:
-	case Mouse3DInput::V3DCMD_VIEW_ROLLCCW:
-	{
-		if (m_glWindow)
-		{
-			CCVector3d  axis(0, 0, -1);
-			CCVector3d  trans(0, 0, 0);
-			ccGLMatrixd mat;
-			double      angle = M_PI / 2;
-			if (cmd == Mouse3DInput::V3DCMD_VIEW_ROLLCCW)
-				angle = -angle;
-			mat.initFromParameters(angle, axis, trans);
-			m_glWindow->rotateBaseViewMat(mat);
-			m_glWindow->redraw();
-		}
-	}
-	break;
-	case Mouse3DInput::V3DCMD_VIEW_SPINCW:
-	case Mouse3DInput::V3DCMD_VIEW_SPINCCW:
-	{
-		if (m_glWindow)
-		{
-			CCVector3d  axis(0, 1, 0);
-			CCVector3d  trans(0, 0, 0);
-			ccGLMatrixd mat;
-			double      angle = M_PI / 2;
-			if (cmd == Mouse3DInput::V3DCMD_VIEW_SPINCCW)
-				angle = -angle;
-			mat.initFromParameters(angle, axis, trans);
-			m_glWindow->rotateBaseViewMat(mat);
-			m_glWindow->redraw();
-		}
-	}
-	case Mouse3DInput::V3DCMD_VIEW_TILTCW:
-	case Mouse3DInput::V3DCMD_VIEW_TILTCCW:
-	{
-		if (m_glWindow)
-		{
-			CCVector3d  axis(1, 0, 0);
-			CCVector3d  trans(0, 0, 0);
-			ccGLMatrixd mat;
-			double      angle = M_PI / 2;
-			if (cmd == Mouse3DInput::V3DCMD_VIEW_TILTCCW)
-				angle = -angle;
-			mat.initFromParameters(angle, axis, trans);
-			m_glWindow->rotateBaseViewMat(mat);
-			m_glWindow->redraw();
-		}
-	}
-	break;
-	default:
-		ccLog::Warning("[3D mouse] This button is not handled (yet)");
-		// TODO
-		break;
-	}
-#endif
-}
-
-void ccViewer::on3DMouseMove(std::vector<float>& vec)
-{
-#ifdef CC_3DXWARE_SUPPORT
-	if (m_glWindow)
-		Mouse3DInput::Apply(vec, m_glWindow);
-#endif
-}
-
-void ccViewer::on3DMouseReleased()
-{
-	// active window?
-	if (m_glWindow && m_glWindow->getPivotVisibility() == ccGLWindowInterface::PIVOT_SHOW_ON_MOVE)
-	{
-		// we have to hide the pivot symbol!
-		m_glWindow->showPivotSymbol(false);
-		m_glWindow->redraw();
-	}
 }
 
 const ccHObject::Container& ccViewer::getSelectedEntities() const

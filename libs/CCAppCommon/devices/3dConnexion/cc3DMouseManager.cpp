@@ -17,9 +17,18 @@
 
 #include "cc3DMouseManager.h"
 
-#include "Mouse3DInput.h"
+#include "I3DMouseBackend.h"
 #include "ccGLWindowInterface.h"
+#include "ccLog.h"
 #include "ccMainAppInterface.h"
+
+#ifdef CC_3DMOUSE_NAVLIB
+#include "navlib/Mouse3DNavlib.h"
+#endif
+
+#ifdef CC_3DMOUSE_LEGACY
+#include "legacy/Mouse3DLegacy.h"
+#endif
 
 #include <QAction>
 #include <QMainWindow>
@@ -28,7 +37,7 @@
 cc3DMouseManager::cc3DMouseManager(ccMainAppInterface* appInterface, QObject* parent)
     : QObject(parent)
     , m_appInterface(appInterface)
-    , m3dMouseInput(nullptr)
+    , m_backend(nullptr)
 {
 	setupMenu();
 
@@ -47,31 +56,65 @@ cc3DMouseManager::~cc3DMouseManager()
 
 void cc3DMouseManager::enableDevice(bool state, bool silent)
 {
-	if (m3dMouseInput)
+	if (m_backend)
 	{
 		releaseDevice();
 	}
 
 	if (state)
 	{
-		m3dMouseInput = new Mouse3DInput(this);
-		if (m3dMouseInput->connect(m_appInterface->getMainWindow(), "CloudCompare"))
-		{
-			connect(m3dMouseInput, &Mouse3DInput::sigMove3d, this, &cc3DMouseManager::on3DMouseMove);
-			connect(m3dMouseInput, &Mouse3DInput::sigReleased, this, &cc3DMouseManager::on3DMouseReleased);
-			connect(m3dMouseInput, &Mouse3DInput::sigOn3dmouseKeyDown, this, &cc3DMouseManager::on3DMouseKeyDown);
-			connect(m3dMouseInput, &Mouse3DInput::sigOn3dmouseKeyUp, this, &cc3DMouseManager::on3DMouseKeyUp);
-			connect(m3dMouseInput, &Mouse3DInput::sigOn3dmouseCMDKeyDown, this, &cc3DMouseManager::on3DMouseCMDKeyDown);
-			connect(m3dMouseInput, &Mouse3DInput::sigOn3dmouseCMDKeyUp, this, &cc3DMouseManager::on3DMouseCMDKeyUp);
-		}
-		else
-		{
-			delete m3dMouseInput;
-			m3dMouseInput = nullptr;
+		bool connected = false;
 
+#ifdef CC_3DMOUSE_NAVLIB
+		// Try navlib first (modern SDK, respects 3DxWare settings)
+		{
+			auto* navlibBackend = new Mouse3DNavlib(this);
+			navlibBackend->setAppInterface(m_appInterface);
+			if (navlibBackend->connect(m_appInterface->getMainWindow(), "CloudCompare"))
+			{
+				m_backend = navlibBackend;
+				connected = true;
+				ccLog::Print("[3D Mouse] Using navlib backend");
+			}
+			else
+			{
+				delete navlibBackend;
+				ccLog::Print("[3D Mouse] navlib backend not available, trying legacy...");
+			}
+		}
+#endif
+
+#ifdef CC_3DMOUSE_LEGACY
+		if (!connected)
+		{
+			// Fall back to legacy SDK
+			auto* legacyBackend = new Mouse3DLegacy(this);
+			if (legacyBackend->connect(m_appInterface->getMainWindow(), "CloudCompare"))
+			{
+				m_backend = legacyBackend;
+				connected = true;
+				ccLog::Print("[3D Mouse] Using legacy 3DxWare SDK backend");
+
+				// Legacy backend emits signals that we handle manually
+				QObject::connect(m_backend, &I3DMouseBackend::sigMove3d, this, &cc3DMouseManager::on3DMouseMove);
+				QObject::connect(m_backend, &I3DMouseBackend::sigReleased, this, &cc3DMouseManager::on3DMouseReleased);
+				QObject::connect(m_backend, &I3DMouseBackend::sigOn3dmouseKeyDown, this, &cc3DMouseManager::on3DMouseKeyDown);
+				QObject::connect(m_backend, &I3DMouseBackend::sigOn3dmouseKeyUp, this, &cc3DMouseManager::on3DMouseKeyUp);
+				QObject::connect(m_backend, &I3DMouseBackend::sigOn3dmouseCMDKeyDown, this, &cc3DMouseManager::on3DMouseCMDKeyDown);
+				QObject::connect(m_backend, &I3DMouseBackend::sigOn3dmouseCMDKeyUp, this, &cc3DMouseManager::on3DMouseCMDKeyUp);
+			}
+			else
+			{
+				delete legacyBackend;
+			}
+		}
+#endif
+
+		if (!connected)
+		{
 			if (!silent)
 			{
-				ccLog::Error("[3D Mouse] No device found"); // warning message has already been issued by Mouse3DInput::connect
+				ccLog::Error("[3D Mouse] No device found");
 			}
 			state = false;
 		}
@@ -88,14 +131,14 @@ void cc3DMouseManager::enableDevice(bool state, bool silent)
 
 void cc3DMouseManager::releaseDevice()
 {
-	if (m3dMouseInput == nullptr)
+	if (m_backend == nullptr)
 		return;
 
-	m3dMouseInput->disconnectDriver(); // disconnect from the driver
-	m3dMouseInput->disconnect(this);   // disconnect from Qt ;)
+	m_backend->disconnect();
+	m_backend->QObject::disconnect(this);
 
-	delete m3dMouseInput;
-	m3dMouseInput = nullptr;
+	delete m_backend;
+	m_backend = nullptr;
 }
 
 void cc3DMouseManager::on3DMouseKeyUp(int)
@@ -110,13 +153,13 @@ void cc3DMouseManager::on3DMouseCMDKeyUp(int)
 
 void cc3DMouseManager::on3DMouseKeyDown(int key)
 {
+#ifdef CC_3DMOUSE_LEGACY
 	switch (key)
 	{
-		// ccLog::Print(QString("on3DMouseKeyDown Key = %1").arg(key));
-	case Mouse3DInput::V3DK_MENU:
+	case Mouse3DLegacy::V3DK_MENU:
 		// should be handled by the driver now!
 		break;
-	case Mouse3DInput::V3DK_FIT:
+	case Mouse3DLegacy::V3DK_FIT:
 	{
 		if (m_appInterface->getSelectedEntities().empty())
 		{
@@ -128,47 +171,47 @@ void cc3DMouseManager::on3DMouseKeyDown(int key)
 		}
 	}
 	break;
-	case Mouse3DInput::V3DK_TOP:
+	case Mouse3DLegacy::V3DK_TOP:
 		m_appInterface->setView(CC_TOP_VIEW);
 		break;
-	case Mouse3DInput::V3DK_LEFT:
+	case Mouse3DLegacy::V3DK_LEFT:
 		m_appInterface->setView(CC_LEFT_VIEW);
 		break;
-	case Mouse3DInput::V3DK_RIGHT:
+	case Mouse3DLegacy::V3DK_RIGHT:
 		m_appInterface->setView(CC_RIGHT_VIEW);
 		break;
-	case Mouse3DInput::V3DK_FRONT:
+	case Mouse3DLegacy::V3DK_FRONT:
 		m_appInterface->setView(CC_FRONT_VIEW);
 		break;
-	case Mouse3DInput::V3DK_BOTTOM:
+	case Mouse3DLegacy::V3DK_BOTTOM:
 		m_appInterface->setView(CC_BOTTOM_VIEW);
 		break;
-	case Mouse3DInput::V3DK_BACK:
+	case Mouse3DLegacy::V3DK_BACK:
 		m_appInterface->setView(CC_BACK_VIEW);
 		break;
-	case Mouse3DInput::V3DK_ROTATE:
+	case Mouse3DLegacy::V3DK_ROTATE:
 		// should be handled by the driver now!
 		break;
-	case Mouse3DInput::V3DK_PANZOOM:
+	case Mouse3DLegacy::V3DK_PANZOOM:
 		// should be handled by the driver now!
 		break;
-	case Mouse3DInput::V3DK_ISO1:
+	case Mouse3DLegacy::V3DK_ISO1:
 		m_appInterface->setView(CC_ISO_VIEW_1);
 		break;
-	case Mouse3DInput::V3DK_ISO2:
+	case Mouse3DLegacy::V3DK_ISO2:
 		m_appInterface->setView(CC_ISO_VIEW_2);
 		break;
-	case Mouse3DInput::V3DK_PLUS:
+	case Mouse3DLegacy::V3DK_PLUS:
 		// should be handled by the driver now!
 		break;
-	case Mouse3DInput::V3DK_MINUS:
+	case Mouse3DLegacy::V3DK_MINUS:
 		// should be handled by the driver now!
 		break;
-	case Mouse3DInput::V3DK_DOMINANT:
+	case Mouse3DLegacy::V3DK_DOMINANT:
 		// should be handled by the driver now!
 		break;
-	case Mouse3DInput::V3DK_CW:
-	case Mouse3DInput::V3DK_CCW:
+	case Mouse3DLegacy::V3DK_CW:
+	case Mouse3DLegacy::V3DK_CCW:
 	{
 		ccGLWindowInterface* activeWin = m_appInterface->getActiveGLWindow();
 		if (activeWin != nullptr)
@@ -177,7 +220,7 @@ void cc3DMouseManager::on3DMouseKeyDown(int key)
 			CCVector3d  trans(0, 0, 0);
 			ccGLMatrixd mat;
 			double      angle = M_PI / 2;
-			if (key == Mouse3DInput::V3DK_CCW)
+			if (key == Mouse3DLegacy::V3DK_CCW)
 			{
 				angle = -angle;
 			}
@@ -187,23 +230,26 @@ void cc3DMouseManager::on3DMouseKeyDown(int key)
 		}
 	}
 	break;
-	case Mouse3DInput::V3DK_ESC:
-	case Mouse3DInput::V3DK_ALT:
-	case Mouse3DInput::V3DK_SHIFT:
-	case Mouse3DInput::V3DK_CTRL:
+	case Mouse3DLegacy::V3DK_ESC:
+	case Mouse3DLegacy::V3DK_ALT:
+	case Mouse3DLegacy::V3DK_SHIFT:
+	case Mouse3DLegacy::V3DK_CTRL:
 	default:
 		ccLog::Warning("[3D mouse] This button is not handled (yet)");
 		// TODO
 		break;
 	}
+#else
+	Q_UNUSED(key);
+#endif
 }
 
 void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 {
+#ifdef CC_3DMOUSE_LEGACY
 	switch (cmd)
 	{
-	// ccLog::Print(QString("on3DMouseCMDKeyDown Cmd = %1").arg(cmd));
-	case Mouse3DInput::V3DCMD_VIEW_FIT:
+	case Mouse3DLegacy::V3DCMD_VIEW_FIT:
 	{
 		if (m_appInterface->getSelectedEntities().empty())
 		{
@@ -215,32 +261,32 @@ void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 		}
 	}
 	break;
-	case Mouse3DInput::V3DCMD_VIEW_TOP:
+	case Mouse3DLegacy::V3DCMD_VIEW_TOP:
 		m_appInterface->setView(CC_TOP_VIEW);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_LEFT:
+	case Mouse3DLegacy::V3DCMD_VIEW_LEFT:
 		m_appInterface->setView(CC_LEFT_VIEW);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_RIGHT:
+	case Mouse3DLegacy::V3DCMD_VIEW_RIGHT:
 		m_appInterface->setView(CC_RIGHT_VIEW);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_FRONT:
+	case Mouse3DLegacy::V3DCMD_VIEW_FRONT:
 		m_appInterface->setView(CC_FRONT_VIEW);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_BOTTOM:
+	case Mouse3DLegacy::V3DCMD_VIEW_BOTTOM:
 		m_appInterface->setView(CC_BOTTOM_VIEW);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_BACK:
+	case Mouse3DLegacy::V3DCMD_VIEW_BACK:
 		m_appInterface->setView(CC_BACK_VIEW);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_ISO1:
+	case Mouse3DLegacy::V3DCMD_VIEW_ISO1:
 		m_appInterface->setView(CC_ISO_VIEW_1);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_ISO2:
+	case Mouse3DLegacy::V3DCMD_VIEW_ISO2:
 		m_appInterface->setView(CC_ISO_VIEW_2);
 		break;
-	case Mouse3DInput::V3DCMD_VIEW_ROLLCW:
-	case Mouse3DInput::V3DCMD_VIEW_ROLLCCW:
+	case Mouse3DLegacy::V3DCMD_VIEW_ROLLCW:
+	case Mouse3DLegacy::V3DCMD_VIEW_ROLLCCW:
 	{
 		ccGLWindowInterface* activeWin = m_appInterface->getActiveGLWindow();
 		if (activeWin != nullptr)
@@ -249,7 +295,7 @@ void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 			CCVector3d  trans(0, 0, 0);
 			ccGLMatrixd mat;
 			double      angle = M_PI / 2;
-			if (cmd == Mouse3DInput::V3DCMD_VIEW_ROLLCCW)
+			if (cmd == Mouse3DLegacy::V3DCMD_VIEW_ROLLCCW)
 			{
 				angle = -angle;
 			}
@@ -259,8 +305,8 @@ void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 		}
 	}
 	break;
-	case Mouse3DInput::V3DCMD_VIEW_SPINCW:
-	case Mouse3DInput::V3DCMD_VIEW_SPINCCW:
+	case Mouse3DLegacy::V3DCMD_VIEW_SPINCW:
+	case Mouse3DLegacy::V3DCMD_VIEW_SPINCCW:
 	{
 		ccGLWindowInterface* activeWin = m_appInterface->getActiveGLWindow();
 		if (activeWin != nullptr)
@@ -269,7 +315,7 @@ void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 			CCVector3d  trans(0, 0, 0);
 			ccGLMatrixd mat;
 			double      angle = M_PI / 2;
-			if (cmd == Mouse3DInput::V3DCMD_VIEW_SPINCCW)
+			if (cmd == Mouse3DLegacy::V3DCMD_VIEW_SPINCCW)
 			{
 				angle = -angle;
 			}
@@ -278,8 +324,9 @@ void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 			activeWin->redraw();
 		}
 	}
-	case Mouse3DInput::V3DCMD_VIEW_TILTCW:
-	case Mouse3DInput::V3DCMD_VIEW_TILTCCW:
+	break; // Note: original code was missing this break (fall-through bug)
+	case Mouse3DLegacy::V3DCMD_VIEW_TILTCW:
+	case Mouse3DLegacy::V3DCMD_VIEW_TILTCCW:
 	{
 		ccGLWindowInterface* activeWin = m_appInterface->getActiveGLWindow();
 		if (activeWin != nullptr)
@@ -288,7 +335,7 @@ void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 			CCVector3d  trans(0, 0, 0);
 			ccGLMatrixd mat;
 			double      angle = M_PI / 2;
-			if (cmd == Mouse3DInput::V3DCMD_VIEW_TILTCCW)
+			if (cmd == Mouse3DLegacy::V3DCMD_VIEW_TILTCCW)
 			{
 				angle = -angle;
 			}
@@ -303,15 +350,22 @@ void cc3DMouseManager::on3DMouseCMDKeyDown(int cmd)
 		// TODO
 		break;
 	}
+#else
+	Q_UNUSED(cmd);
+#endif
 }
 
 void cc3DMouseManager::on3DMouseMove(std::vector<float>& vec)
 {
+#ifdef CC_3DMOUSE_LEGACY
 	ccGLWindowInterface* win = m_appInterface->getActiveGLWindow();
 	if (win == nullptr)
 		return;
 
-	Mouse3DInput::Apply(vec, win);
+	Mouse3DLegacy::Apply(vec, win);
+#else
+	Q_UNUSED(vec);
+#endif
 }
 
 void cc3DMouseManager::on3DMouseReleased()
@@ -336,7 +390,7 @@ void cc3DMouseManager::setupMenu()
 	m_actionEnable = new QAction(tr("Enable"), this);
 	m_actionEnable->setCheckable(true);
 
-	connect(m_actionEnable, &QAction::toggled, [this](bool state)
+	QObject::connect(m_actionEnable, &QAction::toggled, [this](bool state)
 	        { enableDevice(state, false); });
 
 	m_menu->addAction(m_actionEnable);
