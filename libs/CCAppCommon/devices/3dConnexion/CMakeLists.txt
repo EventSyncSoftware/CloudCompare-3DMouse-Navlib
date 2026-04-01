@@ -56,6 +56,9 @@ if( OPTION_3DMOUSE_NAVLIB )
 
 	if( TDxWare_SDK_FOUND )
 		message( STATUS "3Dconnexion navlib SDK found: ${TDxWare_INCLUDE_DIRS}" )
+		message( STATUS "3Dconnexion navlib library: ${TDxWare_LIBRARIES}" )
+		# Cache the library path so it's available in the link function
+		set( NAVLIB_LIBRARY "${TDxWare_LIBRARIES}" CACHE FILEPATH "navlib library path" FORCE )
 	else()
 		message( SEND_ERROR "3Dconnexion navlib SDK not found. Set NAVLIB_SDK_DIR to the SDK root directory." )
 	endif()
@@ -105,8 +108,8 @@ endif()
 # ---- Link function for parent CMakeLists ----
 
 function( target_link_3DXWARE ) # 1 argument: ARGV0 = target
-	if( OPTION_3DMOUSE_NAVLIB AND TDxWare_SDK_FOUND )
-		target_link_libraries( ${ARGV0} PUBLIC ${TDxWare_LIBRARIES} )
+	if( OPTION_3DMOUSE_NAVLIB AND NAVLIB_LIBRARY )
+		target_link_libraries( ${ARGV0} PUBLIC ${NAVLIB_LIBRARY} )
 	endif()
 
 	if( OPTION_3DMOUSE_LEGACY )
